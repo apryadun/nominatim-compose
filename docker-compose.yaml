@@ -1,0 +1,63 @@
+version: '2'
+services:
+  rest:
+    image: mediagis/nominatim
+    restart: always
+    environment:
+      - TITLE_SERVER_URL
+    volumes:
+      - ./data/rest/conf:/data
+      - ./data/rest/log:/var/log/apache2/
+    networks: 
+      - vpcbr-nominatim
+    ports:
+      - 8080:8080
+#    command: bash -c "while :; do echo `date`; sleep 3600; done"
+    command: |
+      bash -c 'bash -s <<EOF
+      cp /data/settings.php /app/src/build/settings/
+      /app/startapache.sh
+      EOF'
+  db:
+    image: mediagis/nominatim
+    restart: always
+    environment:
+      - OSMFILE
+      - THREADS
+    volumes:
+      - ./data/pbf:/data/pbf
+      - ./data/postgres/db/main:/var/lib/postgresql/11/main
+      - ./data/postgres/db/state:/data/state
+      - ./data/postgres/log:/var/log/postgresql
+    networks: 
+      vpcbr-nominatim:
+        ipv4_address: 172.16.238.10
+#    command: bash -c "while :; do echo `date`; sleep 3600; done"
+    command: |
+      bash -c 'bash -s <<EOF
+      chown postgres:postgres /var/log/postgresql
+      if [ "`ls /data/state/DB_READY && ls -A /var/lib/postgresql/11/main`" ]; then
+         echo "Starting the server"
+         /app/startpostgres.sh
+      else
+         echo "Strating to init"
+         [[ ! "x`ls $OSMFILE`" = "x" ]] || exit 222
+         [[ ! "x$THREADS" = "x" ]] || exit 223
+         rm -rf /var/lib/postgresql/11/main
+         rm -rf /data/state/*
+         /bin/sh /app/init.sh $OSMFILE ../var/lib/postgresql/11/main $THREADS && touch /data/state/DB_READY && exit 0
+      fi;
+      while :; do echo `date`; sleep 600; done
+      EOF'
+networks:
+  vpcbr-nominatim:
+    driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: "true"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.16.238.0/24
+          gateway: 172.16.238.1
+        - subnet: "2001:3984:3989::/64"
+          gateway: "2001:3984:3989::1"
